@@ -11,12 +11,12 @@ import RPi.GPIO as gpio
 ##################################################
 
 camera = PiCamera()
-camera.resolution = (1024, 768)
-camera.framerate = 30
-camera.brightness = 70
-camera.contrast = 40
+camera.resolution = (1024, 768) # (640, 480)
+camera.framerate = 15
+camera.brightness = 40
+camera.contrast = 60
 # camera.image_effect = 'none'
-# camera.awb_mode = 'auto'
+camera.awb_mode = 'sunlight'
 camera.sensor_mode = 4
 # camera.exposure_mode = 'night'
 
