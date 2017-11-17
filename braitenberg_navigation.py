@@ -5,6 +5,8 @@ import math
 from time import sleep, time
 import RPi.GPIO as GPIO
 import numpy as np  # array library
+import threading
+import signal
 
 ##################################################
 #                   Motors Part                  #
@@ -163,30 +165,74 @@ sensor_pos = np.array([0.0, ar, ar * 2.0, ar * 3.0, ar * 4.0, ar * 5.0, ar * 6.0
 braitenbergL = [-0.2, -0.4, -0.6, -0.8, -1, -1.2, -1.4, -1.6]
 braitenbergR = [-1.6, -1.4, -1.2, -1, -0.8, -0.6, -0.4, -0.2]
 
-v0 = 70
+v0 = 2.0
+duty_max = 70.0  # the maximum duty cycle to apply to motors (must not exceed 100)
 maxDistanceDetection = 500
 minDistanceDetection = 2
 
 
+class NavigationThread(threading.Thread):
+    def __init__(self, group=None, target=None, name=None,
+                 args=(), kwargs=None, verbose=None):
+        threading.Thread.__init__(self, group=group, target=target, name=name,
+                                  verbose=verbose)
+        self.args = args
+        self.kwargs = kwargs
+        self.shutdown_flag = threading.Event()
+        return
+
+    def stop(self):
+        self._stop_event.set()
+
+    def stopped(self):
+        return self._stop_event.is_set()
+
+    def run(self):
+        while not self.shutdown_flag.is_set():
+            for x in range(0, 8):
+                turn_to_angle(sensor_pos[x])
+                sleep(0.2)
+                distance = get_obstacle_distance()
+                if distance > maxDistanceDetection or distance < minDistanceDetection:
+                    sensor_val[x] = 0
+                else:
+                    sensor_val[x] = 1 - (
+                        (distance - minDistanceDetection) / (maxDistanceDetection - minDistanceDetection))
+
+            v_left = v0
+            v_right = v0
+
+            for i in range(0, 8):
+                v_left = v_left + braitenbergL[i] * sensor_val[i]
+                v_right = v_right + braitenbergR[i] * sensor_val[i]
+
+            v_left = v_left * duty_max / v0
+            v_right = v_right * duty_max / v0
+
+            change_velocity(v_left, v_right)
+        sleep(1)
+        return
+
+
+navigation_thread = NavigationThread(name='navigation_thread',
+                                     args=('navigation_thread',),
+                                     kwargs={'id': 'navigation_thread'})
+
+
 def start_navigation():
-    for x in range(0, 8):
-        turn_to_angle(sensor_pos[x])
-        distance = get_obstacle_distance()
-        if distance > maxDistanceDetection or distance < minDistanceDetection:
-            sensor_val[x] = 0
-        else:
-            sensor_val[x] = 1 - ((distance - minDistanceDetection) / (maxDistanceDetection - minDistanceDetection))
-
-    for i in range(0, 8):
-        vLeft = vLeft + braitenbergL[i] * sensor_val[i]
-        vRight = vRight + braitenbergR[i] * sensor_val[i]
-
-    change_velocity(vLeft, vRight)
+    navigation_thread.setDaemon(True)
+    navigation_thread.start()
 
 
 def stop_navigation():
-    pass
+    navigation_thread.shutdown_flag.set()
 
+
+def service_shutdown(signum, frame):
+    stop_navigation()
+    pwm_lm.stop()
+    pwm_rm.stop()
+    GPIO.cleanup()
 
 ##################################################
 #             Main application logic             #
@@ -215,6 +261,7 @@ def get_ch():
 
 
 ch = ' '
+signal.signal(signal.SIGTERM, service_shutdown)
 print "Ready"
 
 while ch != 'q' and ch != 'Q':
@@ -236,7 +283,7 @@ while ch != 'q' and ch != 'Q':
         turn_left()
 
 # Cleaning App
-
+stop_navigation()
 pwm_lm.stop()
 pwm_rm.stop()
 GPIO.cleanup()
