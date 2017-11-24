@@ -8,6 +8,19 @@ import numpy as np  # array library
 import threading
 import signal
 
+
+##################################################
+#            Navigation parameters               #
+##################################################
+
+duty_min = 15.0  # the minmum duty cycle to apply to motors bellow this value motors will not turn
+duty_max = 40.0  # the maximum duty cycle to apply to motors (must not exceed 100)
+
+v0 = 1.5  # The average velocity used by motors must be between 0 and 7.2
+
+maxDistanceDetection = 40  # The maximum distance detected by the robot (US sensor)
+minDistanceDetection = 5  # The minimum distance detected by the robot (US Sensor)
+
 ##################################################
 #                   Motors Part                  #
 ##################################################
@@ -85,8 +98,6 @@ def turn_right():
     # pwm_rm.ChangeDutyCycle(70)
     stop_motors()
 
-duty_min = 15.0
-duty_max = 40.0  # the maximum duty cycle to apply to motors (must not exceed 100)
 
 def change_velocity(vl, vr):
     # left motor
@@ -175,10 +186,6 @@ sensor_pos = np.array([0.0, ar, ar * 2.0, ar * 3.0, ar * 4.0, ar * 5.0, ar * 6.0
 braitenbergL = [-0.2, -0.4, -0.6, -0.8, -1, -1.2, -1.4, -1.6]
 braitenbergR = [-1.6, -1.4, -1.2, -1, -0.8, -0.6, -0.4, -0.2]
 
-v0 = 2
-
-maxDistanceDetection = 50
-minDistanceDetection = 5
 
 turn_to_angle(sensor_pos[3])
 
