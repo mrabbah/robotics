@@ -85,16 +85,26 @@ def turn_right():
     # pwm_rm.ChangeDutyCycle(70)
     stop_motors()
 
+duty_min = 15.0
+duty_max = 40.0  # the maximum duty cycle to apply to motors (must not exceed 100)
 
 def change_velocity(vl, vr):
     # left motor
-    GPIO.output(16, False)
-    GPIO.output(18, True)
+    GPIO.output(16, not (vl > 0))
+    GPIO.output(18, (vl > 0))
     # right motor
-    GPIO.output(11, False)
-    GPIO.output(13, True)
-    pwm_lm.ChangeDutyCycle(vl)
-    pwm_rm.ChangeDutyCycle(vr)
+    GPIO.output(11, (vr > 0))
+    GPIO.output(13, not (vr > 0))
+    if abs(vl) >= duty_min and abs(vl) <= duty_max:  # Protect motors
+        pwm_lm.ChangeDutyCycle(abs(vl))
+    else:
+        print "Error : vl = %f must be between %f and %f" % (abs(vl), duty_min, duty_max)
+        pwm_lm.ChangeDutyCycle(0)
+    if abs(vr) >= duty_min  and abs(vr) <= duty_max:
+        pwm_rm.ChangeDutyCycle(abs(vr))
+    else:
+        print "Error : vr = %f must be between %f and %f" % (abs(vr), duty_min, duty_max)
+        pwm_rm.ChangeDutyCycle(0)
     stop_motors()
 
 
@@ -132,7 +142,7 @@ def get_obstacle_distance():
     This function give the distance in cm
     :return: the distance from obstacle in cm
     """
-    print "Starting Measurement..."
+    # print "Starting Measurement..."
     GPIO.output(TRIG, 1)
     sleep(0.00001)
     GPIO.output(TRIG, 0)
@@ -165,11 +175,12 @@ sensor_pos = np.array([0.0, ar, ar * 2.0, ar * 3.0, ar * 4.0, ar * 5.0, ar * 6.0
 braitenbergL = [-0.2, -0.4, -0.6, -0.8, -1, -1.2, -1.4, -1.6]
 braitenbergR = [-1.6, -1.4, -1.2, -1, -0.8, -0.6, -0.4, -0.2]
 
-v0 = 2.0
-duty_max = 70.0  # the maximum duty cycle to apply to motors (must not exceed 100)
-maxDistanceDetection = 500
-minDistanceDetection = 2
+v0 = 2
 
+maxDistanceDetection = 50
+minDistanceDetection = 5
+
+turn_to_angle(sensor_pos[3])
 
 class NavigationThread(threading.Thread):
     def __init__(self, group=None, target=None, name=None,
@@ -188,16 +199,25 @@ class NavigationThread(threading.Thread):
         return self._stop_event.is_set()
 
     def run(self):
+        #print "Thread running .... shutdown flag = %r " % self.shutdown_flag.is_set()
+        step = 0
         while not self.shutdown_flag.is_set():
-            for x in range(0, 8):
+            positions = range(0, 8)
+            if step % 2 == 1:
+                positions = range(7, -1, -1)
+            for x in positions:
                 turn_to_angle(sensor_pos[x])
-                sleep(0.2)
+                sleep(0.1)
                 distance = get_obstacle_distance()
-                if distance > maxDistanceDetection or distance < minDistanceDetection:
+                # print "Distanc = %f \n" % distance
+                if distance > maxDistanceDetection:
                     sensor_val[x] = 0
+                elif distance < minDistanceDetection:
+                    sensor_val[x] = 1
                 else:
                     sensor_val[x] = 1 - (
                         (distance - minDistanceDetection) / (maxDistanceDetection - minDistanceDetection))
+                # print "sensor_val[%d] = %f\n" % (x, sensor_val[x])
 
             v_left = v0
             v_right = v0
@@ -206,10 +226,16 @@ class NavigationThread(threading.Thread):
                 v_left = v_left + braitenbergL[i] * sensor_val[i]
                 v_right = v_right + braitenbergR[i] * sensor_val[i]
 
+            print "step %d v left = %f and v right = %f\n\t" % (step, v_left, v_right)
+
             v_left = v_left * duty_max / v0
             v_right = v_right * duty_max / v0
 
+            print "step %d , v left = %f and v right = %f\n\t" % (step, v_left, v_right)
+
             change_velocity(v_left, v_right)
+            # sleep(0.1)
+            step = step + 1
         sleep(1)
         return
 
@@ -220,6 +246,7 @@ navigation_thread = NavigationThread(name='navigation_thread',
 
 
 def start_navigation():
+    #print "Starting navigation .... "
     navigation_thread.setDaemon(True)
     navigation_thread.start()
 
@@ -266,7 +293,7 @@ print "Ready"
 
 while ch != 'q' and ch != 'Q':
     ch = get_ch()
-    # print "Executing requested task ..."
+    print "Executing requested task ... %s " % ch
     if ch == '1':
         start_navigation()
     elif ch == '2':
@@ -284,6 +311,7 @@ while ch != 'q' and ch != 'Q':
 
 # Cleaning App
 stop_navigation()
+turn_to_angle(sensor_pos[3])
 pwm_lm.stop()
 pwm_rm.stop()
 GPIO.cleanup()
