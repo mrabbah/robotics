@@ -27,6 +27,7 @@ minDistanceDetection = 5  # The minimum distance detected by the robot (US Senso
 datas = []
 datas_file_path = 'braitenberg_navigation.csv'
 
+
 class Data:
     def __init__(self, t, obtacles_distances, vl, vr):
         self.time = t
@@ -36,12 +37,21 @@ class Data:
 
 
 def save_datas():
-    with open(datas_file_path, 'a') as datas_file:
-        for data in datas:
-            line = '%f;' % data.time
-            for obstacle_distance in data.obtacles_distances
-                line = line + '%f;' % obstacle_distance
-            line = line + '%f;%f\n' % (data.vl, data.vr)
+    global datas
+    nb_lines = len(datas)
+    if nb_lines > 0:
+        print "writing %d lines to %s files" % (nb_lines, datas_file_path)
+        with open(datas_file_path, 'a') as datas_file:
+            for data in datas:
+                line = '%f;' % data.time
+                for obstacle_distance in data.obtacles_distances:
+                    line = line + '%f;' % obstacle_distance
+                line = line + '%f;%f\n' % (data.vl, data.vr)
+                # print line
+                datas_file.write(line)
+            datas = []
+    else:
+        print "no datas to store"
 
 
 ##################################################
@@ -233,7 +243,7 @@ class NavigationThread(threading.Thread):
         step = 0
         t = time()
         while not self.shutdown_flag.is_set():
-            distances_obstacles = []
+            distances_obstacles = [None] * 8
             positions = range(0, 8)
             if step % 2 == 1:
                 positions = range(7, -1, -1)
