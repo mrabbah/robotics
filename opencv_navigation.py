@@ -7,7 +7,11 @@ import RPi.GPIO as GPIO
 import numpy as np  # array library
 import threading
 import signal
-
+# import the necessary packages
+from picamera.array import PiRGBArray
+from picamera import PiCamera
+import cv2
+from colorama import init,Fore
 
 ##################################################
 #            Navigation parameters               #
@@ -119,8 +123,158 @@ def change_velocity(vl, vr):
 
 
 ##################################################
-#                OpenCV Part                #
+#                  OpenCV Part                   #
 ##################################################
+# initialize the camera and grab a reference to the raw camera capture
+DisplayImage = True
+
+print "Starting OpenCV"
+capture = cv2.VideoCapture(0)
+
+capture.set(3, 640)  # 1024 640 1280 800 384
+capture.set(4, 480)  # 600 480 960 600 288
+
+if DisplayImage is True:
+    cv2.namedWindow("camera", 0)
+    cv2.namedWindow("transform", 0)
+    print (Fore.GREEN + "Creating OpenCV windows")
+    # cv2.waitKey(50)
+    cv2.resizeWindow("camera", 640, 480)
+    cv2.resizeWindow("transform", 300, 300)
+    print (Fore.GREEN + "Resizing OpenCV windows")
+    # cv2.waitKey(50)
+    cv2.moveWindow("camera", 400, 30)
+    cv2.moveWindow("transform", 1100, 30)
+    print (Fore.GREEN + "Moving OpenCV window")
+    cv2.waitKey(50)
+
+##################################################################################################
+#
+# Display image - Capture a frame and display it on the screen
+#
+##################################################################################################
+def DisplayFrame():
+    ret, img = capture.read()
+    ret, img = capture.read()
+    ret, img = capture.read()
+    ret, img = capture.read()
+    ret, img = capture.read()  # get a bunch of frames to make sure current frame is the most recent
+
+    cv2.imshow("camera", img)
+    cv2.waitKey(10)
+
+
+##################################################################################################
+#
+# Reform Contours - Takes an approximated array of 4 pairs of coordinates and puts them in the order
+# TOP-LEFT, TOP-RIGHT, BOTTOM-RIGHT, BOTTOM-LEFT
+#
+##################################################################################################
+def ReformContours(contours):
+    contours = contours.reshape((4, 2))
+    contoursnew = np.zeros((4, 2), dtype=np.float32)
+
+    add = contours.sum(1)
+    contoursnew[0] = contours[np.argmin(add)]
+    contoursnew[2] = contours[np.argmax(add)]
+
+    diff = np.diff(contours, axis=1)
+    contoursnew[1] = contours[np.argmin(diff)]
+    contoursnew[3] = contours[np.argmax(diff)]
+
+    return contoursnew
+
+##################################################################################################
+#
+# Check Ground
+#
+##################################################################################################
+
+def CheckGround():
+    StepSize = 8
+    EdgeArray = []
+
+    sleep(0.1)  # let image settle
+    ret, img = capture.read()  # get a bunch of frames to make sure current frame is the most recent
+    ret, img = capture.read()
+    ret, img = capture.read()
+    ret, img = capture.read()
+    ret, img = capture.read()  # 5 seems to be enough
+
+    imgGray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)  # convert img to grayscale and store result in imgGray
+    imgGray = cv2.bilateralFilter(imgGray, 9, 30, 30)  # blur the image slightly to remove noise
+    imgEdge = cv2.Canny(imgGray, 50, 100)  # edge detection
+
+    imagewidth = imgEdge.shape[1] - 1
+    imageheight = imgEdge.shape[0] - 1
+
+    for j in range(0, imagewidth, StepSize):  # for the width of image array
+        for i in range(imageheight - 5, 0, -1):  # step through every pixel in height of array from bottom to top
+            # Ignore first couple of pixels as may trigger due to undistort
+            if imgEdge.item(i, j) == 255:  # check to see if the pixel is white which indicates an edge has been found
+                EdgeArray.append((j, i))  # if it is, add x,y coordinates to ObstacleArray
+                break  # if white pixel is found, skip rest of pixels in column
+        else:  # no white pixel found
+            EdgeArray.append(
+                (j, 0))  # if nothing found, assume no obstacle. Set pixel position way off the screen to indicate
+            # no obstacle detected
+
+    for x in range(len(EdgeArray) - 1):  # draw lines between points in ObstacleArray
+        cv2.line(img, EdgeArray[x], EdgeArray[x + 1], (0, 255, 0), 1)
+    for x in range(len(EdgeArray)):  # draw lines from bottom of the screen to points in ObstacleArray
+        cv2.line(img, (x * StepSize, imageheight), EdgeArray[x], (0, 255, 0), 1)
+
+    if DisplayImage is True:
+        cv2.imshow("camera", img)
+        cv2.waitKey(10)
+
+
+##################################################################################################
+#
+# NewMap - Creates a new map
+#
+##################################################################################################
+
+def NewMap(MapWidth, MapHeight):
+    MapArray = np.ones((MapHeight, MapWidth, 3), np.uint8)
+    MapArray[:MapWidth] = (255, 255, 255)  # (B, G, R)
+
+    return MapArray
+
+
+##################################################################################################
+#
+# AddToMap -
+#
+##################################################################################################
+
+def AddToMap(MapArray, X, Y, Type):
+    Width = MapArray.shape[1]
+    Height = MapArray.shape[0]
+    print Type, "in AddToMap"
+
+    if Type == 'FOOD':
+        cv2.circle(MapArray, (X, Y), 2, (0, 0, 255), -1)  # draw a circle
+    elif Type == 'HOME':
+        cv2.circle(MapArray, (X, Y), 2, (0, 255, 0), -1)  # draw a circle
+
+    return MapArray
+
+
+##################################################################################################
+#
+# ShowMap - Displays a map in an opencv window
+# MapArray is a numpy array where each element has a value between 0 and 1
+#
+##################################################################################################
+
+def ShowMap(MapArray):
+    cv2.imshow("map", MapArray)
+    cv2.waitKey(50)
+
+
+def destroy():
+    cv2.destroyAllWindows()
 
 
 class NavigationThread(threading.Thread):
@@ -142,6 +296,7 @@ class NavigationThread(threading.Thread):
     def run(self):
         #print "Thread running .... shutdown flag = %r " % self.shutdown_flag.is_set()
         step = 0
+        '''
         while not self.shutdown_flag.is_set():
             positions = range(0, 8)
 
@@ -159,6 +314,7 @@ class NavigationThread(threading.Thread):
             # sleep(0.1)
             step = step + 1
         sleep(1)
+        '''
         return
 
 
