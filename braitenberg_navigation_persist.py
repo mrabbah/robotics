@@ -7,6 +7,11 @@ import RPi.GPIO as GPIO
 import numpy as np  # array library
 import threading
 import signal
+import logging
+from logging.handlers import RotatingFileHandler
+from logging import handlers
+import sys
+from Queue import Queue
 
 ##################################################
 #            Navigation parameters               #
@@ -21,10 +26,28 @@ maxDistanceDetection = 40  # The maximum distance detected by the robot (US sens
 minDistanceDetection = 5  # The minimum distance detected by the robot (US Sensor)
 
 ##################################################
-#          Persisting data Part             #
+#                 Logging part                   #
 ##################################################
 
-datas = []
+log = logging.getLogger('')
+log.setLevel(logging.DEBUG)
+format = logging.Formatter('%(asctime)s.%(msecs)03d %(levelname)s:(%(threadName)-10s) %(message)s')
+sh = logging.StreamHandler(sys.stdout)
+sh.setFormatter(format)
+log.addHandler(sh)
+
+fh = handlers.RotatingFileHandler("braitenberg_navigation_persist.log", maxBytes=(1048576*5), backupCount=7)
+fh.setFormatter(format)
+log.addHandler(fh)
+
+# logging.basicConfig(level=logging.DEBUG, format='%(asctime)s.%(msecs)03d %(levelname)s:(%(threadName)-10s) %(message)s',datefmt='%m/%d/%Y %H:%M:%S',)
+
+
+##################################################
+#            Persisting data Part                #
+##################################################
+
+datas = Queue()
 datas_file_path = 'braitenberg_navigation.csv'
 
 
@@ -37,21 +60,24 @@ class Data:
 
 
 def save_datas():
+    log.debug('save data function called')
     global datas
-    nb_lines = len(datas)
-    if nb_lines > 0:
-        print "writing %d lines to %s files" % (nb_lines, datas_file_path)
-        with open(datas_file_path, 'a') as datas_file:
-            for data in datas:
-                line = '%f;' % data.time
-                for obstacle_distance in data.obtacles_distances:
-                    line = line + '%f;' % obstacle_distance
-                line = line + '%f;%f\n' % (data.vl, data.vr)
-                # print line
-                datas_file.write(line)
-            datas = []
+    nb_lignes = datas.qsize()
+    if nb_lignes > 0:
+        log.debug("writing %d lines to %s files" % (nb_lignes, datas_file_path))
+        outFile = open(datas_file_path, 'w')
+        while datas.qsize():
+            data = datas.get()
+            line = '%f;' % data.time
+            for obstacle_distance in data.obtacles_distances:
+                line = line + '%f;' % obstacle_distance
+            line = line + '%f;%f\n' % (data.vl, data.vr)
+            outFile.write(line)
+        outFile.flush()
+        outFile.close()
     else:
-        print "no datas to store"
+        log.debug("no data to write to file")
+
 
 
 ##################################################
@@ -142,12 +168,12 @@ def change_velocity(vl, vr):
     if abs(vl) >= duty_min and abs(vl) <= duty_max:  # Protect motors
         pwm_lm.ChangeDutyCycle(abs(vl))
     else:
-        print "Error : vl = %f must be between %f and %f" % (abs(vl), duty_min, duty_max)
+        log.debug("Error : vl = %f must be between %f and %f" % (abs(vl), duty_min, duty_max))
         pwm_lm.ChangeDutyCycle(0)
     if abs(vr) >= duty_min and abs(vr) <= duty_max:
         pwm_rm.ChangeDutyCycle(abs(vr))
     else:
-        print "Error : vr = %f must be between %f and %f" % (abs(vr), duty_min, duty_max)
+        log.debug("Error : vr = %f must be between %f and %f" % (abs(vr), duty_min, duty_max))
         pwm_rm.ChangeDutyCycle(0)
     stop_motors()
 
@@ -186,7 +212,7 @@ def get_obstacle_distance():
     This function give the distance in cm
     :return: the distance from obstacle in cm
     """
-    # print "Starting Measurement..."
+    # log.debug( "Starting Measurement...")
     GPIO.output(TRIG, 1)
     sleep(0.00001)
     GPIO.output(TRIG, 0)
@@ -239,7 +265,7 @@ class NavigationThread(threading.Thread):
         return self._stop_event.is_set()
 
     def run(self):
-        # print "Thread running .... shutdown flag = %r " % self.shutdown_flag.is_set()
+        # log.debug( "Thread running .... shutdown flag = %r " % self.shutdown_flag.is_set())
         step = 0
         t = time()
         while not self.shutdown_flag.is_set():
@@ -252,7 +278,7 @@ class NavigationThread(threading.Thread):
                 sleep(0.1)
                 distance = get_obstacle_distance()
                 distances_obstacles[x] = distance
-                # print "Distanc = %f \n" % distance
+                # log.debug( "Distanc = %f \n" % distance)
                 if distance > maxDistanceDetection:
                     sensor_val[x] = 0
                 elif distance < minDistanceDetection:
@@ -260,7 +286,7 @@ class NavigationThread(threading.Thread):
                 else:
                     sensor_val[x] = 1 - (
                         (distance - minDistanceDetection) / (maxDistanceDetection - minDistanceDetection))
-                    # print "sensor_val[%d] = %f\n" % (x, sensor_val[x])
+                    # log.debug( "sensor_val[%d] = %f\n" % (x, sensor_val[x]))
 
             v_left = v0
             v_right = v0
@@ -269,15 +295,15 @@ class NavigationThread(threading.Thread):
                 v_left = v_left + braitenbergL[i] * sensor_val[i]
                 v_right = v_right + braitenbergR[i] * sensor_val[i]
 
-            print "step %d v left = %f and v right = %f\n\t" % (step, v_left, v_right)
+            log.debug("step %d v left = %f and v right = %f\n\t" % (step, v_left, v_right))
 
             v_left = v_left * duty_max / v0
             v_right = v_right * duty_max / v0
 
             t_prime = time()
             data = Data(t_prime - t, distances_obstacles, v_left, v_right)
-            datas.append(data)
-            print "step %d , v left = %f and v right = %f\n\t" % (step, v_left, v_right)
+            datas.put(data)
+            # log.debug( "step %d , v left = %f and v right = %f\n\t" % (step, v_left, v_right))
 
             change_velocity(v_left, v_right)
             # sleep(0.1)
@@ -292,13 +318,15 @@ navigation_thread = NavigationThread(name='navigation_thread',
 
 
 def start_navigation():
-    # print "Starting navigation .... "
+    # log.debug( "Starting navigation .... ")
     navigation_thread.setDaemon(True)
     navigation_thread.start()
 
 
 def stop_navigation():
     navigation_thread.shutdown_flag.set()
+    log.debug('calling save data from stop navigation')
+    navigation_thread.join() # wait until thread terminate
     save_datas()
 
 
@@ -341,7 +369,7 @@ print "Ready"
 
 while ch != 'q' and ch != 'Q':
     ch = get_ch()
-    print "Executing requested task ... %s " % ch
+    log.debug("Executing requested task ... %s " % ch)
     if ch == '1':
         start_navigation()
     elif ch == '2':
