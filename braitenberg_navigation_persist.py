@@ -326,7 +326,8 @@ def start_navigation():
 def stop_navigation():
     navigation_thread.shutdown_flag.set()
     log.debug('calling save data from stop navigation')
-    navigation_thread.join() # wait until thread terminate
+    if navigation_thread.isAlive():
+        navigation_thread.join() # wait until thread terminate
     save_datas()
 
 
