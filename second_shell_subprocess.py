@@ -24,3 +24,6 @@ time.sleep(15)
 
 if not received:
     print('CHILD {:>6}: Never received signal'.format(pid))
+
+print('End of subprocess ...')
+sys.stdout.flush()
